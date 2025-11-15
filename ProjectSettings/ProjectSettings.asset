@@ -845,8 +845,8 @@ PlayerSettings:
   editorAssembliesCompatibilityLevel: 1
   m_RenderingPath: 1
   m_MobileRenderingPath: 1
-  metroPackageName: wk5_proto_bloaty
-  metroPackageVersion: 
+  metroPackageName: wk5protobloaty
+  metroPackageVersion: 1.0.0.0
   metroCertificatePath: 
   metroCertificatePassword: 
   metroCertificateSubject: 
@@ -854,7 +854,7 @@ PlayerSettings:
   metroCertificateNotAfter: 0000000000000000
   metroApplicationDescription: wk5_proto_bloaty
   wsaImages: {}
-  metroTileShortName: 
+  metroTileShortName: wk5_proto_bloaty
   metroTileShowName: 0
   metroMediumTileShowName: 0
   metroLargeTileShowName: 0
@@ -921,7 +921,7 @@ PlayerSettings:
   qnxGraphicConfPath: 
   apiCompatibilityLevel: 6
   captureStartupLogs: {}
-  activeInputHandler: 1
+  activeInputHandler: 2
   windowsGamepadBackendHint: 0
   cloudProjectId: cb8ea007-9247-413f-9c59-81ad92086196
   framebufferDepthMemorylessMode: 0
