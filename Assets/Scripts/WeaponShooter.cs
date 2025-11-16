@@ -1,26 +1,29 @@
-﻿// WeaponShooter.cs
+﻿// WeaponShooter.cs  (Luigi vacuum, new Rpc API)
 using UnityEngine;
 using UnityEngine.InputSystem;
+using Unity.Netcode;
 
-public class WeaponShooter : MonoBehaviour
+public class WeaponShooter : NetworkBehaviour
 {
     [Header("Core")]
     public Camera cam;
-    public float range = 50f;
+    public float vacuumRange = 25f;
+    public float vacuumRadius = 1.2f;
     public LayerMask hitMask = ~0;
-    public float shootCooldown = 0.1f;
+    public float vacuumTicksPerSecond = 10f;
 
     [Header("VFX/SFX")]
-    public Transform muzzle;                    // where muzzle flash spawns (can use camera)
-    public ParticleSystem muzzleFlashPrefab;    // short burst
-    public ParticleSystem hitSparkPrefab;       // small spark/poof on crop hit
-    public AudioSource audioSource;             // optional
-    public AudioClip shootClip;
+    public Transform muzzle;
+    public ParticleSystem vacuumLoopPrefab;
+    public AudioSource audioSource;
+    public AudioClip vacuumLoopClip;
 
     [Header("UI")]
     public ReticleHUD reticle;
 
-    float cd;
+    bool isVacuuming;
+    float vacuumTickCD;
+    ParticleSystem _vacuumInstance;
 
     void Awake()
     {
@@ -31,49 +34,145 @@ public class WeaponShooter : MonoBehaviour
 
     void Update()
     {
-        cd -= Time.deltaTime;
+        if (!IsOwner || cam == null) return;
 
-        // Continuous center ray to tint reticle when hovering a crop
+        // Reticle hover
+
         Ray aimRay = cam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
-        bool onCrop = Physics.Raycast(aimRay, out RaycastHit hoverHit, range, hitMask, QueryTriggerInteraction.Ignore)
-                      && hoverHit.collider.GetComponentInParent<CropOrb>() != null;
+        bool onCrop = Physics.Raycast(aimRay, out RaycastHit hoverHit, vacuumRange, hitMask, QueryTriggerInteraction.Ignore)
+                      && hoverHit.collider.GetComponentInParent<NetworkCropOrb>() != null;
         if (reticle) reticle.SetTargeting(onCrop);
 
-        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame && cd <= 0f)
+        // Hold LMB to vacuum
+        bool held = Mouse.current != null && Mouse.current.leftButton.isPressed;
+
+        if (held && !isVacuuming)
         {
-            cd = shootCooldown;
-            Shoot();
+            isVacuuming = true;
+            vacuumTickCD = 0f;
+            StartVacuumLocal();
+            StartVacuumClientRpc();
+        }
+        else if (!held && isVacuuming)
+        {
+            isVacuuming = false;
+            StopVacuumLocal();
+            StopVacuumClientRpc();
+        }
+
+        if (!isVacuuming) return;
+
+        vacuumTickCD -= Time.deltaTime;
+        if (vacuumTickCD <= 0f)
+        {
+            vacuumTickCD = 1f / Mathf.Max(1f, vacuumTicksPerSecond);
+
+            Ray ray = cam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
+            VacuumRpc(ray.origin, ray.direction);
+
         }
     }
 
-    void Shoot()
+    // ───────── local FX ─────────
+
+    void StartVacuumLocal()
     {
-        // 🔸 MUZZLE PARTICLES (spawn here)
-        if (muzzleFlashPrefab && muzzle)
-            Instantiate(muzzleFlashPrefab, muzzle.position, muzzle.rotation).Play();
-
-        if (audioSource && shootClip)
-            audioSource.PlayOneShot(shootClip);
-
-        if (reticle) reticle.Pop(); // 🔸 RETICLE POP on shoot
-
-        Ray ray = cam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
-        if (Physics.Raycast(ray, out RaycastHit hit, range, hitMask, QueryTriggerInteraction.Ignore))
+        if (vacuumLoopPrefab && muzzle && _vacuumInstance == null)
         {
-            // 🔸 HIT PARTICLES (spawn at impact)
-            if (hitSparkPrefab)
-                Instantiate(hitSparkPrefab, hit.point, Quaternion.LookRotation(hit.normal)).Play();
+            _vacuumInstance = Instantiate(vacuumLoopPrefab, muzzle.position, muzzle.rotation, muzzle);
+            _vacuumInstance.Play();
+        }
 
-            var orb = hit.collider.GetComponentInParent<CropOrb>();
-            if (orb) orb.DetachAndFollow(PlayerRoot(), hit.point, hit.normal); // pass impact for orb VFX
+        if (audioSource && vacuumLoopClip)
+        {
+            audioSource.clip = vacuumLoopClip;
+            audioSource.loop = true;
+            if (!audioSource.isPlaying)
+                audioSource.Play();
         }
     }
 
-    Transform PlayerRoot()
+    void StopVacuumLocal()
     {
-        // assume weapon is under the player hierarchy
-        Transform t = transform;
-        while (t.parent != null) t = t.parent;
-        return t;
+        if (_vacuumInstance)
+        {
+            _vacuumInstance.Stop();
+            Destroy(_vacuumInstance.gameObject, 1f);
+            _vacuumInstance = null;
+        }
+
+        if (audioSource && audioSource.clip == vacuumLoopClip)
+        {
+            audioSource.Stop();
+            audioSource.loop = false;
+        }
+    }
+
+    [ClientRpc]
+    void StartVacuumClientRpc()
+    {
+        if (IsOwner) return;
+
+        if (vacuumLoopPrefab && muzzle && _vacuumInstance == null)
+        {
+            _vacuumInstance = Instantiate(vacuumLoopPrefab, muzzle.position, muzzle.rotation, muzzle);
+            _vacuumInstance.Play();
+        }
+
+        if (audioSource && vacuumLoopClip)
+        {
+            audioSource.clip = vacuumLoopClip;
+            audioSource.loop = true;
+            if (!audioSource.isPlaying)
+                audioSource.Play();
+        }
+    }
+
+    [ClientRpc]
+    void StopVacuumClientRpc()
+    {
+        if (IsOwner) return;
+
+        if (_vacuumInstance)
+        {
+            _vacuumInstance.Stop();
+            Destroy(_vacuumInstance.gameObject, 1f);
+            _vacuumInstance = null;
+        }
+
+        if (audioSource && audioSource.clip == vacuumLoopClip)
+        {
+            audioSource.Stop();
+            audioSource.loop = false;
+        }
+    }
+
+
+    [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+    void VacuumRpc(Vector3 origin, Vector3 direction, RpcParams rpcParams = default)
+    {
+        Ray ray = new Ray(origin, direction.normalized);
+
+        RaycastHit[] hits = Physics.SphereCastAll(
+            ray,
+            vacuumRadius,
+            vacuumRange,
+            hitMask,
+            QueryTriggerInteraction.Ignore
+        );
+
+        Debug.Log($"[SERVER] Vacuum from client {OwnerClientId}, hits: {hits.Length}");
+
+        for (int i = 0; i < hits.Length; i++)
+        {
+            var hit = hits[i];
+
+            NetworkCropOrb orb = hit.collider.GetComponentInParent<NetworkCropOrb>();
+            if (orb != null)
+            {
+                Vector3 normal = -direction.normalized;
+                orb.DetachAndFollow(OwnerClientId, hit.point, normal);
+            }
+        }
     }
 }

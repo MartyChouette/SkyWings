@@ -1,10 +1,10 @@
-// BalloonArea.cs
 using UnityEngine;
+using Unity.Netcode;
 
 [RequireComponent(typeof(Collider))]
-public class BalloonArea : MonoBehaviour
+public class BalloonArea : NetworkBehaviour
 {
-    public BalloonLift lift;
+    public NetworkBalloonLift lift;
 
     void Reset()
     {
@@ -14,8 +14,10 @@ public class BalloonArea : MonoBehaviour
 
     void OnTriggerEnter(Collider other)
     {
-        var orb = other.GetComponentInParent<CropOrb>();
-        if (orb && (orb.state == CropOrb.State.FollowingPlayer))
+        if (!IsServer) return;   // only the server routes orbs to balloon
+
+        var orb = other.GetComponentInParent<NetworkCropOrb>();
+        if (orb != null)
         {
             orb.GoToBalloon(lift);
         }
