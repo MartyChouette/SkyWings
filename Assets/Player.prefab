@@ -461,7 +461,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
-  GlobalObjectIdHash: 4215395982
+  GlobalObjectIdHash: 4057122255
   InScenePlacedSourceGlobalObjectIdHash: 4057122255
   DeferredDespawnTick: 0
   Ownership: 1
@@ -553,9 +553,9 @@ MonoBehaviour:
   ShowTopMostFoldoutHeaderGroup: 1
   NetworkTransformExpanded: 1
   AutoOwnerAuthorityTickOffset: 1
-  PositionInterpolationType: 0
-  RotationInterpolationType: 0
-  ScaleInterpolationType: 0
+  PositionInterpolationType: 1
+  RotationInterpolationType: 1
+  ScaleInterpolationType: 1
   PositionLerpSmoothing: 1
   PositionMaxInterpolationTime: 0.1
   RotationLerpSmoothing: 1
@@ -682,10 +682,17 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 4294967295
   vacuumTicksPerSecond: 10
+  shootRange: 50
+  shootMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
   muzzle: {fileID: 0}
   vacuumLoopPrefab: {fileID: 0}
+  shootMuzzlePrefab: {fileID: 0}
+  hitSparkPrefab: {fileID: 0}
   audioSource: {fileID: 0}
   vacuumLoopClip: {fileID: 0}
+  shootClip: {fileID: 0}
   reticle: {fileID: 0}
 --- !u!135 &3793434287965068799
 SphereCollider:

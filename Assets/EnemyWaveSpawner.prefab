@@ -65,7 +65,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7171129311595394510}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: dd3e088c48ba56b4287fb0df1adae9db, type: 3}
   m_Name: 
@@ -76,6 +76,10 @@ MonoBehaviour:
     count: 5
     spawnRadius: 35
     spawnInterval: 15
-  flightPhaseWaves: []
+  flightPhaseWaves:
+  - enemyPrefab: {fileID: 2697823406323130869, guid: 7156623fb23c1314eb42bca532881b71, type: 3}
+    count: 10
+    spawnRadius: 20
+    spawnInterval: 10
   timeBetweenGatherWaves: 8
   timeBetweenFlightWaves: 6

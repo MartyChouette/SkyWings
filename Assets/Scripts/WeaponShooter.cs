@@ -1,13 +1,7 @@
-﻿// WeaponShooter.cs  (Luigi vacuum, new Rpc API, fixed)
-using Unity.Netcode;
-using Unity.Netcode.Components;
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.InputSystem;
+using Unity.Netcode;
 
-
-
-[RequireComponent(typeof(SphereCollider))]
-[RequireComponent(typeof(NetworkTransform))]    // 👈 add this
 public class WeaponShooter : NetworkBehaviour
 {
     [Header("Core")]
@@ -17,11 +11,18 @@ public class WeaponShooter : NetworkBehaviour
     public LayerMask hitMask = ~0;
     public float vacuumTicksPerSecond = 10f;
 
+    [Header("Shoot")]
+    public float shootRange = 50f;
+    public LayerMask shootMask = ~0;
+
     [Header("VFX/SFX")]
     public Transform muzzle;
     public ParticleSystem vacuumLoopPrefab;
+    public ParticleSystem shootMuzzlePrefab;
+    public ParticleSystem hitSparkPrefab;
     public AudioSource audioSource;
     public AudioClip vacuumLoopClip;
+    public AudioClip shootClip;
 
     [Header("UI")]
     public ReticleHUD reticle;
@@ -30,78 +31,85 @@ public class WeaponShooter : NetworkBehaviour
     float vacuumTickCD;
     ParticleSystem _vacuumInstance;
 
+    PlayerCornInventory _inventory;
+
     void Awake()
     {
         if (!cam) cam = Camera.main;
         if (!muzzle) muzzle = cam ? cam.transform : transform;
         if (!audioSource) audioSource = GetComponent<AudioSource>();
+        _inventory = GetComponent<PlayerCornInventory>();
     }
 
     void Update()
     {
-        // Only the local player reads input and sends RPCs.
         if (!IsOwner || cam == null) return;
 
-        // ───────── Reticle hover ─────────
         Ray aimRay = cam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
-        bool onCrop = Physics.Raycast(
-                          aimRay,
-                          out RaycastHit hoverHit,
-                          vacuumRange,
-                          hitMask,
-                          QueryTriggerInteraction.Ignore
-                      )
+        bool onCrop = Physics.Raycast(aimRay, out RaycastHit hoverHit, vacuumRange, hitMask, QueryTriggerInteraction.Ignore)
                       && hoverHit.collider.GetComponentInParent<NetworkCropOrb>() != null;
-
         if (reticle) reticle.SetTargeting(onCrop);
 
-        // ───────── Input ─────────
-        bool held = Mouse.current != null && Mouse.current.leftButton.isPressed;
+        bool lmbHeld = Mouse.current != null && Mouse.current.leftButton.isPressed;
+        bool rmbPressed = Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame;
 
+        // ───────── Vacuum (LMB hold) ─────────
+        HandleVacuum(lmbHeld, aimRay);
+
+        // ───────── Shoot (RMB press) ─────────
+        if (rmbPressed)
+        {
+            Vector3 origin = aimRay.origin;
+            Vector3 direction = aimRay.direction;
+
+            // optional client-side gate to avoid spam when ammo is zero
+            if (_inventory == null || _inventory.Ammo <= 0)
+            {
+                // could play a "click" sound or UI feedback here
+            }
+            else
+            {
+                ShootServerRpc(origin, direction);
+            }
+        }
+    }
+
+    void HandleVacuum(bool held, Ray aimRay)
+    {
         if (held && !isVacuuming)
         {
             isVacuuming = true;
             vacuumTickCD = 0f;
-
-            // Owner plays FX immediately
             StartVacuumLocal();
-
-            // Tell the server we started, so it can fan out to other clients
-            StartVacuumServerRpc();
+            StartVacuumClientsRpc();    // show FX on other clients
         }
         else if (!held && isVacuuming)
         {
             isVacuuming = false;
-
             StopVacuumLocal();
-            StopVacuumServerRpc();
+            StopVacuumClientsRpc();
         }
 
         if (!isVacuuming) return;
 
-        // ───────── Tick to send suction ray to server ─────────
         vacuumTickCD -= Time.deltaTime;
         if (vacuumTickCD <= 0f)
         {
             vacuumTickCD = 1f / Mathf.Max(1f, vacuumTicksPerSecond);
 
-            Ray ray = cam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
-            VacuumServerRpc(ray.origin, ray.direction);
+            Vector3 origin = aimRay.origin;
+            Vector3 direction = aimRay.direction;
+            VacuumServerRpc(origin, direction);
         }
     }
 
-    // ───────── Local FX helpers (no networking here) ─────────
+    // ───────── local FX ─────────
 
     void StartVacuumLocal()
     {
         if (vacuumLoopPrefab && muzzle && _vacuumInstance == null)
         {
-            _vacuumInstance = Instantiate(
-                vacuumLoopPrefab,
-                muzzle.position,
-                muzzle.rotation,
-                muzzle
-            );
+            _vacuumInstance = Instantiate(vacuumLoopPrefab, muzzle.position, muzzle.rotation, muzzle);
             _vacuumInstance.Play();
         }
 
@@ -130,44 +138,50 @@ public class WeaponShooter : NetworkBehaviour
         }
     }
 
-    // ───────── RPCs for starting / stopping vacuum FX ─────────
-    // Owner -> Server
-    [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
-    void StartVacuumServerRpc(RpcParams rpcParams = default)
-    {
-        // On server, tell all clients (including host's client) to start FX
-        StartVacuumClientRpc();
-    }
+    // ───────── Vacuum RPCs ─────────
 
-    [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
-    void StopVacuumServerRpc(RpcParams rpcParams = default)
-    {
-        StopVacuumClientRpc();
-    }
-
-    // Server -> Clients
-    // Runs on all *clients* (including the host's client);
-    // we skip the owner because they already did StartVacuumLocal/StopVacuumLocal.
     [Rpc(SendTo.ClientsAndHost)]
-    void StartVacuumClientRpc(RpcParams rpcParams = default)
+    void StartVacuumClientsRpc(RpcParams rpcParams = default)
     {
-        if (IsOwner) return; // already started locally
-        StartVacuumLocal();
+        if (IsOwner) return; // owner already started local FX
+
+        if (vacuumLoopPrefab && muzzle && _vacuumInstance == null)
+        {
+            _vacuumInstance = Instantiate(vacuumLoopPrefab, muzzle.position, muzzle.rotation, muzzle);
+            _vacuumInstance.Play();
+        }
+
+        if (audioSource && vacuumLoopClip)
+        {
+            audioSource.clip = vacuumLoopClip;
+            audioSource.loop = true;
+            if (!audioSource.isPlaying)
+                audioSource.Play();
+        }
     }
 
     [Rpc(SendTo.ClientsAndHost)]
-    void StopVacuumClientRpc(RpcParams rpcParams = default)
+    void StopVacuumClientsRpc(RpcParams rpcParams = default)
     {
-        if (IsOwner) return; // already stopped locally
-        StopVacuumLocal();
+        if (IsOwner) return;
+
+        if (_vacuumInstance)
+        {
+            _vacuumInstance.Stop();
+            Destroy(_vacuumInstance.gameObject, 1f);
+            _vacuumInstance = null;
+        }
+
+        if (audioSource && audioSource.clip == vacuumLoopClip)
+        {
+            audioSource.Stop();
+            audioSource.loop = false;
+        }
     }
 
-    // ───────── Vacuum hits (gameplay) ─────────
-    // Owner -> Server
-    [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
+    [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
     void VacuumServerRpc(Vector3 origin, Vector3 direction, RpcParams rpcParams = default)
     {
-        // Only runs on server
         Ray ray = new Ray(origin, direction.normalized);
 
         RaycastHit[] hits = Physics.SphereCastAll(
@@ -178,13 +192,9 @@ public class WeaponShooter : NetworkBehaviour
             QueryTriggerInteraction.Ignore
         );
 
-        // Optional debug
-        // Debug.Log($"[SERVER] Vacuum from client {OwnerClientId}, hits: {hits.Length}");
-
         for (int i = 0; i < hits.Length; i++)
         {
             var hit = hits[i];
-
             NetworkCropOrb orb = hit.collider.GetComponentInParent<NetworkCropOrb>();
             if (orb != null)
             {
@@ -192,5 +202,56 @@ public class WeaponShooter : NetworkBehaviour
                 orb.DetachAndFollow(OwnerClientId, hit.point, normal);
             }
         }
+    }
+
+    // ───────── Shooting ─────────
+
+    [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+    void ShootServerRpc(Vector3 origin, Vector3 direction, RpcParams rpcParams = default)
+    {
+        var player = GetComponent<PlayerCornInventory>();
+        if (player == null) return;
+
+        // ammo gate (server-authoritative)
+        if (!player.ServerConsumeAmmo(1))
+            return;
+
+        // Do actual hit detection server-side
+        Ray ray = new Ray(origin, direction.normalized);
+        if (Physics.Raycast(ray, out RaycastHit hit, shootRange, shootMask, QueryTriggerInteraction.Ignore))
+        {
+            // damage enemies
+            var enemy = hit.collider.GetComponentInParent<NetworkEnemyBase>();
+            if (enemy != null)
+            {
+                enemy.ServerApplyDamage(1); // or pass damage amount
+            }
+
+            // spawn hit FX for everyone
+            ShootHitClientsRpc(muzzle ? muzzle.position : origin, hit.point, hit.normal);
+        }
+        else
+        {
+            // no hit, just play muzzle FX
+            ShootHitClientsRpc(muzzle ? muzzle.position : origin, origin + direction.normalized * shootRange, -direction.normalized);
+        }
+    }
+
+    [Rpc(SendTo.ClientsAndHost)]
+    void ShootHitClientsRpc(Vector3 muzzlePos, Vector3 hitPos, Vector3 hitNormal, RpcParams rpcParams = default)
+    {
+        // muzzle flash
+        if (shootMuzzlePrefab && muzzle)
+            Instantiate(shootMuzzlePrefab, muzzle.position, muzzle.rotation, muzzle).Play();
+
+        // hit spark
+        if (hitSparkPrefab)
+            Instantiate(hitSparkPrefab, hitPos, Quaternion.LookRotation(hitNormal)).Play();
+
+        // sound
+        if (audioSource && shootClip)
+            audioSource.PlayOneShot(shootClip);
+
+        if (reticle) reticle.Pop();
     }
 }

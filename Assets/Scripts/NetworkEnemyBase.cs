@@ -5,6 +5,7 @@ using System.Collections.Generic;
 [RequireComponent(typeof(NetworkObject))]
 public class NetworkEnemyBase : NetworkBehaviour
 {
+    [Header("Stats")]
     public float maxHealth = 10f;
     public float moveSpeed = 6f;
     public float hoverHeight = 3f;
@@ -12,6 +13,7 @@ public class NetworkEnemyBase : NetworkBehaviour
     public float attackCooldown = 1.5f;
     public float attackRange = 3f;
 
+    [Header("VFX / SFX")]
     public ParticleSystem deathVfx;
     public AudioSource audioSource;
     public AudioClip deathClip;
@@ -66,10 +68,14 @@ public class NetworkEnemyBase : NetworkBehaviour
         NetworkPlayer closest = null;
         float bestDist = float.MaxValue;
 
+        if (NetworkManager.Singleton == null)
+            return null;
+
         foreach (var kvp in NetworkManager.Singleton.ConnectedClients)
         {
             var po = kvp.Value.PlayerObject;
             if (!po) continue;
+
             var p = po.GetComponent<NetworkPlayer>();
             if (!p) continue;
 
@@ -84,35 +90,66 @@ public class NetworkEnemyBase : NetworkBehaviour
         return closest;
     }
 
-    // called by server when shot
+    /// <summary>
+    /// Called by server (e.g. from weapon RPC) when this enemy is hit.
+    /// </summary>
     public void ServerApplyDamage(float dmg)
     {
         if (!IsServer) return;
-        if (_health <= 0) return;
+        if (_health <= 0f) return;
 
         _health -= dmg;
-        if (_health <= 0)
+        if (_health <= 0f)
         {
-            _health = 0;
+            _health = 0f;
             Die();
         }
     }
 
     void Die()
     {
-        if (deathVfx)
-            SpawnDeathVfxClientRpc(transform.position);
+        // tell everyone to play VFX/SFX at this position
+        if (deathVfx || (audioSource && deathClip))
+        {
+            SpawnDeathEffectsRpc(transform.position);
+        }
 
-        if (audioSource && deathClip)
-            audioSource.PlayOneShot(deathClip);
-
+        // Despawn on the server; NGO replicates that
         GetComponent<NetworkObject>().Despawn();
     }
 
-    [ClientRpc]
-    void SpawnDeathVfxClientRpc(Vector3 pos)
+    // New-style RPC, replaces [ClientRpc]
+    [Rpc(SendTo.ClientsAndHost)]
+    void SpawnDeathEffectsRpc(Vector3 pos, RpcParams rpcParams = default)
     {
+        // VFX
         if (deathVfx)
-            Instantiate(deathVfx, pos, Quaternion.identity).Play();
+        {
+            var fx = Instantiate(deathVfx, pos, Quaternion.identity);
+            fx.Play();
+        }
+
+        // SFX – 3D sound at enemy position
+        if (deathClip)
+        {
+            // Option 1: use existing audioSource if it lives on this prefab
+            if (audioSource)
+            {
+                audioSource.transform.position = pos;
+                audioSource.clip = deathClip;
+                audioSource.Play();
+            }
+            else
+            {
+                // Option 2: fire-and-forget AudioSource at pos
+                var go = new GameObject("EnemyDeathAudio");
+                go.transform.position = pos;
+                var src = go.AddComponent<AudioSource>();
+                src.spatialBlend = 1f; // 3D
+                src.clip = deathClip;
+                src.Play();
+                Object.Destroy(go, deathClip.length + 0.25f);
+            }
+        }
     }
 }

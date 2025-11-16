@@ -66,16 +66,18 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2013231110891422909}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 2ba1d12ba1d3fd04c89e9c71e8a17d28, type: 3}
   m_Name: 
   m_EditorClassIdentifier: '::'
   ShowTopMostFoldoutHeaderGroup: 1
+  cornOrbPrefab: {fileID: 0}
   rows: 10
   cols: 10
   spacing: 3
-  cornOrbPrefab: {fileID: 667774353328400830, guid: f30677026fe0b3047943c8d33d207a24, type: 3}
+  orbHeight: 1.8
+  stalkVisualPrefab: {fileID: 0}
 --- !u!114 &8487158221867626681
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -3,8 +3,8 @@ using Unity.Netcode;
 using Unity.Netcode.Components;
 
 [RequireComponent(typeof(SphereCollider))]
-
-[RequireComponent(typeof(NetworkTransform))]   // make sure movement replicates
+[RequireComponent(typeof(NetworkObject))]
+[RequireComponent(typeof(NetworkTransform))]
 public class NetworkCropOrb : NetworkBehaviour
 {
     public enum State : byte
@@ -25,14 +25,21 @@ public class NetworkCropOrb : NetworkBehaviour
     public ParticleSystem shotPoofPrefab;
     public ParticleSystem absorbPoofPrefab;
 
+    [Header("Collected Visuals")]
+    public Renderer orbRenderer;          // optional, will auto-find if null
+    public Material collectedMaterial;    // slightly transparent
+    public bool disableCollidersWhenCollected = true;
+
     Rigidbody rb;
 
-    // chase targets
     Transform followTarget;
     Vector3 localOffset;
 
     Transform absorbedAnchor;
     Vector3 absorbedOffset;
+
+    // who vacuumed this corn last (used for ammo credit)
+    [HideInInspector] public ulong lastCollectorId;
 
     NetworkVariable<State> state = new NetworkVariable<State>(
         State.Attached,
@@ -58,6 +65,9 @@ public class NetworkCropOrb : NetworkBehaviour
             rb.angularDrag = 0.5f;
 #endif
         }
+
+        if (!orbRenderer)
+            orbRenderer = GetComponentInChildren<Renderer>();
     }
 
     public override void OnNetworkSpawn()
@@ -69,20 +79,18 @@ public class NetworkCropOrb : NetworkBehaviour
 
         if (IsServer)
         {
-            // server owns physics
             rb.isKinematic = false;
             rb.useGravity = true;
             state.Value = State.Attached;
         }
         else
         {
-            // clients let NetworkTransform drive them
             rb.isKinematic = true;
             rb.useGravity = false;
         }
     }
 
-    // ───────────────── public API ─────────────────
+    // ─────────── called by server from Weapon / Vacuum ───────────
 
     public void DetachAndFollow(ulong ownerClientId, Vector3 impactPoint, Vector3 impactNormal)
     {
@@ -90,6 +98,8 @@ public class NetworkCropOrb : NetworkBehaviour
 
         if (state.Value != State.Attached && state.Value != State.FollowingPlayer)
             return;
+
+        lastCollectorId = ownerClientId;
 
         if (shotPoofPrefab)
             SpawnShotPoofClientsRpc(impactPoint, impactNormal);
@@ -131,8 +141,6 @@ public class NetworkCropOrb : NetworkBehaviour
         StartCoroutine(AbsorbWhenClose(lift));
     }
 
-    // ───────────────── absorb coroutine ─────────────────
-
     System.Collections.IEnumerator AbsorbWhenClose(NetworkBalloonLift lift)
     {
         while (IsServer && state.Value == State.ToBalloon && followTarget)
@@ -155,7 +163,12 @@ public class NetworkCropOrb : NetworkBehaviour
                 if (absorbPoofPrefab)
                     SpawnAbsorbPoofClientsRpc(transform.position);
 
+                // mark visuals as collected on all clients (transparent, no collisions)
+                SetCollectedVisualsClientsRpc();
+
+                // tell the balloon it absorbed us (this also handles ammo credit)
                 lift.AbsorbOrb(this);
+
                 yield break;
             }
 
@@ -163,7 +176,7 @@ public class NetworkCropOrb : NetworkBehaviour
         }
     }
 
-    // ───────────────── RPCs ─────────────────
+    // ─────────── RPCs ───────────
 
     [Rpc(SendTo.ClientsAndHost)]
     void SpawnShotPoofClientsRpc(Vector3 pos, Vector3 normal, RpcParams rpcParams = default)
@@ -179,7 +192,20 @@ public class NetworkCropOrb : NetworkBehaviour
             Instantiate(absorbPoofPrefab, pos, Quaternion.identity).Play();
     }
 
-    // ───────────────── movement ─────────────────
+    [Rpc(SendTo.ClientsAndHost)]
+    void SetCollectedVisualsClientsRpc(RpcParams rpcParams = default)
+    {
+        if (disableCollidersWhenCollected)
+        {
+            foreach (var col in GetComponentsInChildren<Collider>())
+                col.enabled = false;
+        }
+
+        if (orbRenderer && collectedMaterial)
+            orbRenderer.material = collectedMaterial;
+    }
+
+    // ─────────── movement (server-authoritative) ───────────
 
     void FixedUpdate()
     {
@@ -238,7 +264,6 @@ public class NetworkCropOrb : NetworkBehaviour
         }
         else if (state.Value == State.Absorbed && absorbedAnchor)
         {
-            // keep stuck to balloon without parenting
             transform.position = absorbedAnchor.position + absorbedOffset;
         }
     }
