@@ -1,8 +1,10 @@
 ﻿using UnityEngine;
 using Unity.Netcode;
+using Unity.Netcode.Components;
 
 [RequireComponent(typeof(SphereCollider))]
-[RequireComponent(typeof(NetworkObject))]
+
+[RequireComponent(typeof(NetworkTransform))]   // make sure movement replicates
 public class NetworkCropOrb : NetworkBehaviour
 {
     public enum State : byte
@@ -23,15 +25,12 @@ public class NetworkCropOrb : NetworkBehaviour
     public ParticleSystem shotPoofPrefab;
     public ParticleSystem absorbPoofPrefab;
 
-    // ─────────────────────────────── private state ───────────────────────────────
-
     Rigidbody rb;
 
-    // While attached / following / to-balloon we use this as the “chase” target
+    // chase targets
     Transform followTarget;
     Vector3 localOffset;
 
-    // When absorbed, we no longer parent but we keep an anchor + offset
     Transform absorbedAnchor;
     Vector3 absorbedOffset;
 
@@ -40,8 +39,6 @@ public class NetworkCropOrb : NetworkBehaviour
         NetworkVariableReadPermission.Everyone,
         NetworkVariableWritePermission.Server
     );
-
-    // ─────────────────────────────── lifecycle ───────────────────────────────
 
     void Awake()
     {
@@ -61,7 +58,6 @@ public class NetworkCropOrb : NetworkBehaviour
             rb.angularDrag = 0.5f;
 #endif
         }
-        // DO NOT decide kinematic / gravity here; we’ll do it in OnNetworkSpawn
     }
 
     public override void OnNetworkSpawn()
@@ -73,59 +69,39 @@ public class NetworkCropOrb : NetworkBehaviour
 
         if (IsServer)
         {
-            // Server owns physics
+            // server owns physics
             rb.isKinematic = false;
             rb.useGravity = true;
+            state.Value = State.Attached;
         }
         else
         {
-            // Clients: let NetworkTransform drive; no local physics
+            // clients let NetworkTransform drive them
             rb.isKinematic = true;
             rb.useGravity = false;
         }
-
-        if (IsServer)
-        {
-            state.Value = State.Attached;
-        }
     }
 
-    // ─────────────────────────────── public API ───────────────────────────────
+    // ───────────────── public API ─────────────────
 
-    /// <summary>
-    /// Shot by a player; detach from stalk and start following that player.
-    /// Server only.
-    /// </summary>
     public void DetachAndFollow(ulong ownerClientId, Vector3 impactPoint, Vector3 impactNormal)
     {
         if (!IsServer) return;
-
-        Debug.Log($"[SERVER] DetachAndFollow on {name}, state={state.Value}, owner={ownerClientId}");
 
         if (state.Value != State.Attached && state.Value != State.FollowingPlayer)
             return;
 
         if (shotPoofPrefab)
-            SpawnShotPoofClientRpc(impactPoint, impactNormal);
+            SpawnShotPoofClientsRpc(impactPoint, impactNormal);
 
-        // Detach from stalk (null parent is valid for a NetworkObject)
         transform.SetParent(null, true);
 
         if (!rb)
-        {
             rb = GetComponent<Rigidbody>();
-            if (!rb)
-            {
-                rb = gameObject.AddComponent<Rigidbody>();
-                rb.mass = 0.5f;
-            }
-        }
 
-        // Server does physics
         rb.isKinematic = false;
         rb.useGravity = true;
 
-        // Find the owning player object
         if (NetworkManager.Singleton != null &&
             NetworkManager.Singleton.ConnectedClients.TryGetValue(ownerClientId, out var client))
         {
@@ -133,7 +109,7 @@ public class NetworkCropOrb : NetworkBehaviour
         }
         else
         {
-            Debug.LogWarning("[SERVER] DetachAndFollow: could not find player for ownerClientId=" + ownerClientId);
+            Debug.LogWarning($"[SERVER] DetachAndFollow: owner {ownerClientId} not found.");
             return;
         }
 
@@ -141,10 +117,6 @@ public class NetworkCropOrb : NetworkBehaviour
         state.Value = State.FollowingPlayer;
     }
 
-    /// <summary>
-    /// Called when entering the balloon area: fly to the balloon and get absorbed.
-    /// Server only.
-    /// </summary>
     public void GoToBalloon(NetworkBalloonLift lift)
     {
         if (!IsServer) return;
@@ -159,7 +131,7 @@ public class NetworkCropOrb : NetworkBehaviour
         StartCoroutine(AbsorbWhenClose(lift));
     }
 
-    // ─────────────────────────────── absorb coroutine ───────────────────────────────
+    // ───────────────── absorb coroutine ─────────────────
 
     System.Collections.IEnumerator AbsorbWhenClose(NetworkBalloonLift lift)
     {
@@ -177,13 +149,11 @@ public class NetworkCropOrb : NetworkBehaviour
                 rb.isKinematic = true;
                 rb.useGravity = false;
 
-                // Instead of parenting (which NGO forbids to non-NetworkObject parents),
-                // just snap to our anchor + offset once:
                 if (absorbedAnchor)
                     transform.position = absorbedAnchor.position + absorbedOffset;
 
                 if (absorbPoofPrefab)
-                    SpawnAbsorbPoofClientRpc(transform.position);
+                    SpawnAbsorbPoofClientsRpc(transform.position);
 
                 lift.AbsorbOrb(this);
                 yield break;
@@ -193,23 +163,23 @@ public class NetworkCropOrb : NetworkBehaviour
         }
     }
 
-    // ─────────────────────────────── RPCs ───────────────────────────────
+    // ───────────────── RPCs ─────────────────
 
-    [ClientRpc]
-    void SpawnShotPoofClientRpc(Vector3 pos, Vector3 normal)
+    [Rpc(SendTo.ClientsAndHost)]
+    void SpawnShotPoofClientsRpc(Vector3 pos, Vector3 normal, RpcParams rpcParams = default)
     {
         if (shotPoofPrefab)
             Instantiate(shotPoofPrefab, pos, Quaternion.LookRotation(normal)).Play();
     }
 
-    [ClientRpc]
-    void SpawnAbsorbPoofClientRpc(Vector3 pos)
+    [Rpc(SendTo.ClientsAndHost)]
+    void SpawnAbsorbPoofClientsRpc(Vector3 pos, RpcParams rpcParams = default)
     {
         if (absorbPoofPrefab)
             Instantiate(absorbPoofPrefab, pos, Quaternion.identity).Play();
     }
 
-    // ─────────────────────────────── movement ───────────────────────────────
+    // ───────────────── movement ─────────────────
 
     void FixedUpdate()
     {
@@ -225,7 +195,6 @@ public class NetworkCropOrb : NetworkBehaviour
             Vector3 steerForce = (desiredVel - rb.linearVelocity) * steering;
             rb.AddForce(steerForce, ForceMode.Acceleration);
 
-            // Keep a little distance from the player
             Vector3 flatTo = Vector3.ProjectOnPlane(followTarget.position - transform.position, Vector3.up);
             if (flatTo.magnitude < keepDistance)
                 rb.AddForce(-flatTo.normalized * steering, ForceMode.Acceleration);
@@ -269,7 +238,7 @@ public class NetworkCropOrb : NetworkBehaviour
         }
         else if (state.Value == State.Absorbed && absorbedAnchor)
         {
-            // Keep orb “stuck” to the balloon without changing its parent
+            // keep stuck to balloon without parenting
             transform.position = absorbedAnchor.position + absorbedOffset;
         }
     }

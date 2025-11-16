@@ -1,31 +1,35 @@
 using UnityEngine;
 using Unity.Netcode;
 
-/// <summary>
-/// Server-only corn field spawner that instantiates networked orb prefabs
-/// in a grid.
-/// </summary>
+/// In-scene server spawner that creates a grid of corn orbs.
+[RequireComponent(typeof(NetworkObject))]
 public class NetworkCropFieldSpawner : NetworkBehaviour
 {
-    public int rows = 5, cols = 6;
-    public float spacing = 2f;
+    [Header("Corn Prefab (NetworkObject at root)")]
+    public NetworkObject cornOrbPrefab;   // assign in inspector
 
-    [Tooltip("Prefab with NetworkObject + NetworkCropOrb")]
-    public GameObject cornOrbPrefab;
+    [Header("Grid")]
+    public int rows = 5;
+    public int cols = 6;
+    public float spacing = 2f;
+    public float orbHeight = 1.8f;        // Y position for the orb
+
+    [Header("Optional: visual stalk")]
+    public GameObject stalkVisualPrefab;  // OPTIONAL, no NetworkObject
 
     public override void OnNetworkSpawn()
     {
         base.OnNetworkSpawn();
-        if (!IsServer) return;
+        if (!IsServer) return;            // only server spawns corn
 
         SpawnField();
     }
 
     void SpawnField()
     {
-        if (!cornOrbPrefab)
+        if (cornOrbPrefab == null)
         {
-            Debug.LogError("NetworkCropFieldSpawner: cornOrbPrefab not assigned.");
+            Debug.LogError("NetworkCropFieldSpawner: cornOrbPrefab is NOT assigned.");
             return;
         }
 
@@ -33,18 +37,23 @@ public class NetworkCropFieldSpawner : NetworkBehaviour
         {
             for (int c = 0; c < cols; c++)
             {
-                Vector3 basePos = transform.position + new Vector3(c * spacing, 0, r * spacing);
+                Vector3 basePos = transform.position +
+                                  new Vector3(c * spacing, 0f, r * spacing);
 
-                GameObject orb = Instantiate(cornOrbPrefab, basePos, Quaternion.identity);
-                var no = orb.GetComponent<NetworkObject>();
-                if (no == null)
+                // Optional purely-visual stalk (no NetworkObject!)
+                if (stalkVisualPrefab != null)
                 {
-                    Debug.LogError("cornOrbPrefab missing NetworkObject.");
+                    Instantiate(stalkVisualPrefab,
+                        basePos,
+                        Quaternion.identity,
+                        transform); // parent for organization only
                 }
-                else
-                {
-                    no.Spawn(true);
-                }
+
+                // Networked orb
+                Vector3 orbPos = basePos + new Vector3(0f, orbHeight, 0f);
+
+                NetworkObject orbNO = Instantiate(cornOrbPrefab, orbPos, Quaternion.identity);
+                orbNO.Spawn(true); // spawn with observers
             }
         }
     }
