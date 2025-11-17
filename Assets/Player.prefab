@@ -314,6 +314,7 @@ GameObject:
   - component: {fileID: 6198773962837370815}
   - component: {fileID: 3605059306306506455}
   - component: {fileID: 4025058881689288341}
+  - component: {fileID: 2614795612316232350}
   m_Layer: 0
   m_Name: Player
   m_TagString: Player
@@ -611,6 +612,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::ProximityVoicePlayer
   ShowTopMostFoldoutHeaderGroup: 1
   mainChannelName: cornfield
+  balloonChannelName: balloon
+  audibleDistance: 32
+  conversationalDistance: 1
+  audioFadeIntensity: 1
+  positionUpdateInterval: 0.3
+  listenerTransformOverride: {fileID: 1110998686919068311}
 --- !u!114 &4025058881689288341
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -627,7 +634,24 @@ MonoBehaviour:
   maxHealth: 100
   respawnDelay: 4
   Health:
-    m_InternalValue: 0
+    m_InternalValue: 50
+--- !u!114 &2614795612316232350
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3794320133350595385}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ff57c341fb7f2c44cac50dea36625ec3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: '::'
+  ShowTopMostFoldoutHeaderGroup: 1
+  groundRayDistance: 1
+  groundMask:
+    serializedVersion: 2
+    m_Bits: 8
 --- !u!1 &3824195310855457038
 GameObject:
   m_ObjectHideFlags: 0

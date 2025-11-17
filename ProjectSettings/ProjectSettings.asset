@@ -926,10 +926,10 @@ PlayerSettings:
   captureStartupLogs: {}
   activeInputHandler: 2
   windowsGamepadBackendHint: 0
-  cloudProjectId: cb8ea007-9247-413f-9c59-81ad92086196
+  cloudProjectId: 15a0e363-52ba-464d-bcfa-701abb4c348f
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames: []
-  projectName: wk5_proto_bloaty
+  projectName: SkyWings
   organizationId: m4rty64
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 0
