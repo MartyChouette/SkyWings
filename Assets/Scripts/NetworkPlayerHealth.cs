@@ -1,64 +1,137 @@
 using UnityEngine;
 using Unity.Netcode;
 
+[RequireComponent(typeof(Rigidbody))]
+[RequireComponent(typeof(NetworkObject))]
 public class NetworkPlayerHealth : NetworkBehaviour
 {
+    [Header("Health")]
     public float maxHealth = 100f;
-    public float respawnDelay = 4f;
 
-    public NetworkVariable<float> Health = new NetworkVariable<float>();
+    // Synced health (server writes, everyone reads)
+    public NetworkVariable<float> currentHealth = new NetworkVariable<float>(0f);
 
-    bool _dead;
+    [Header("Knockback")]
+    [Tooltip("Default knockback if none is provided by the attacker.")]
+    public float defaultKnockbackForce = 6f;
+
+    [Tooltip("Optional respawn point; if null, uses starting position.")]
+    public Transform respawnPoint;
+
+    Rigidbody _rb;
+    Vector3 _spawnPos;
+    Quaternion _spawnRot;
+
+    void Awake()
+    {
+        _rb = GetComponent<Rigidbody>();
+        _spawnPos = transform.position;
+        _spawnRot = transform.rotation;
+    }
 
     public override void OnNetworkSpawn()
     {
-        base.OnNetworkSpawn();
         if (IsServer)
         {
-            Health.Value = maxHealth;
+            if (currentHealth.Value <= 0f)
+                currentHealth.Value = maxHealth;
         }
     }
 
-    public void ServerTakeDamage(float dmg)
-    {
-        if (!IsServer || _dead) return;
+    // =====================================================================
+    // DAMAGE API
+    // =====================================================================
 
-        Health.Value = Mathf.Max(0, Health.Value - dmg);
-        if (Health.Value <= 0)
+    /// <summary>
+    /// Legacy signature – no knockback information.
+    /// You can keep calling this anywhere you already do.
+    /// </summary>
+    public void ServerTakeDamage(float damage)
+    {
+        ServerTakeDamage(damage, Vector3.zero, 0f);
+    }
+
+    /// <summary>
+    /// Preferred version: apply damage + knockback.
+    /// MUST be called on the server.
+    /// </summary>
+    public void ServerTakeDamage(float damage, Vector3 hitDirection, float knockbackForceOverride = 0f)
+    {
+        if (!IsServer) return;
+        if (damage <= 0f) return;
+
+        currentHealth.Value = Mathf.Max(0f, currentHealth.Value - damage);
+
+        float force = knockbackForceOverride > 0f ? knockbackForceOverride : defaultKnockbackForce;
+
+        if (force > 0f && hitDirection.sqrMagnitude > 0.0001f)
         {
-            _dead = true;
-            DeathClientRpc();
-            StartCoroutine(RespawnCR());
+            KnockbackClientRpc(hitDirection.normalized, force);
+        }
+
+        if (currentHealth.Value <= 0f)
+        {
+            HandleDeathServer();
         }
     }
 
-    System.Collections.IEnumerator RespawnCR()
+    // =====================================================================
+    // DEATH / RESPAWN
+    // =====================================================================
+
+    void HandleDeathServer()
     {
-        yield return new WaitForSeconds(respawnDelay);
+        if (_rb != null)
+        {
+            _rb.linearVelocity = Vector3.zero;
+            _rb.angularVelocity = Vector3.zero;
+        }
 
-        var cc = GetComponent<CharacterController>();
-        if (cc) cc.enabled = false;
+        DeathClientRpc();
 
-        // super simple respawn; swap in your spawn system here
-        transform.position = Vector3.zero + Vector3.up * 1.5f;
+        float respawnDelay = 1.5f;
+        Invoke(nameof(RespawnServer), respawnDelay);
+    }
 
-        if (cc) cc.enabled = true;
-        Health.Value = maxHealth;
-        _dead = false;
-        RespawnClientRpc();
+    void RespawnServer()
+    {
+        if (!IsServer) return;
+
+        currentHealth.Value = maxHealth;
+
+        Vector3 pos = respawnPoint ? respawnPoint.position : _spawnPos;
+        Quaternion rot = respawnPoint ? respawnPoint.rotation : _spawnRot;
+
+        TeleportClientRpc(pos, rot);
+    }
+
+    // =====================================================================
+    // RPCs
+    // =====================================================================
+
+    [ClientRpc]
+    void KnockbackClientRpc(Vector3 dir, float force)
+    {
+        if (_rb == null) return;
+        _rb.AddForce(dir * force, ForceMode.VelocityChange);
+    }
+
+    [ClientRpc]
+    void TeleportClientRpc(Vector3 pos, Quaternion rot)
+    {
+        transform.position = pos;
+        transform.rotation = rot;
+
+        if (_rb != null)
+        {
+            _rb.linearVelocity = Vector3.zero;
+            _rb.angularVelocity = Vector3.zero;
+        }
     }
 
     [ClientRpc]
     void DeathClientRpc()
     {
-        // TODO: death VFX, disable input, fade, etc.
-        Debug.Log($"Player {OwnerClientId} died.");
-    }
-
-    [ClientRpc]
-    void RespawnClientRpc()
-    {
-        // TODO: clear UI, enable input, etc.
-        Debug.Log($"Player {OwnerClientId} respawned.");
+        // TODO: play death animation / VFX / sound here.
     }
 }

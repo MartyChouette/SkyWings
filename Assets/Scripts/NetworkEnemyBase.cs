@@ -12,6 +12,7 @@ public class NetworkEnemyBase : NetworkBehaviour
     public float damagePerHit = 10f;
     public float attackCooldown = 1.5f;
     public float attackRange = 3f;
+    public float knockbackForce = 6f;  // NEW: how hard we shove the player
 
     [Header("VFX / SFX")]
     public ParticleSystem deathVfx;
@@ -57,9 +58,20 @@ public class NetworkEnemyBase : NetworkBehaviour
         if (dist <= attackRange && _attackCd <= 0f)
         {
             _attackCd = attackCooldown;
-            var hp = target.GetComponent<NetworkPlayerHealth>();
-            if (hp != null)
-                hp.ServerTakeDamage(damagePerHit);
+            OnAttackPlayer(target);
+        }
+    }
+
+    /// <summary>
+    /// Default attack: damage + knockback. Special enemies override this.
+    /// </summary>
+    protected virtual void OnAttackPlayer(NetworkPlayer target)
+    {
+        var hp = target.GetComponent<NetworkPlayerHealth>();
+        if (hp != null)
+        {
+            Vector3 knockDir = (target.transform.position - transform.position).normalized;
+            hp.ServerTakeDamage(damagePerHit, knockDir, knockbackForce);
         }
     }
 
@@ -118,7 +130,6 @@ public class NetworkEnemyBase : NetworkBehaviour
         GetComponent<NetworkObject>().Despawn();
     }
 
-    // New-style RPC, replaces [ClientRpc]
     [Rpc(SendTo.ClientsAndHost)]
     void SpawnDeathEffectsRpc(Vector3 pos, RpcParams rpcParams = default)
     {
@@ -132,7 +143,6 @@ public class NetworkEnemyBase : NetworkBehaviour
         // SFX – 3D sound at enemy position
         if (deathClip)
         {
-            // Option 1: use existing audioSource if it lives on this prefab
             if (audioSource)
             {
                 audioSource.transform.position = pos;
@@ -141,14 +151,13 @@ public class NetworkEnemyBase : NetworkBehaviour
             }
             else
             {
-                // Option 2: fire-and-forget AudioSource at pos
                 var go = new GameObject("EnemyDeathAudio");
                 go.transform.position = pos;
                 var src = go.AddComponent<AudioSource>();
-                src.spatialBlend = 1f; // 3D
+                src.spatialBlend = 1f;
                 src.clip = deathClip;
                 src.Play();
-                Object.Destroy(go, deathClip.length + 0.25f);
+                Destroy(go, deathClip.length + 0.25f);
             }
         }
     }

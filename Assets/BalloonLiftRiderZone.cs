@@ -2,8 +2,8 @@ using UnityEngine;
 using Unity.Netcode;
 
 /// Trigger zone on top of the balloon platform that parents / unparents
-/// players so they move with the lift instead of sliding off, and lets
-/// the lift know how many riders it currently has.
+/// players so they move with the lift instead of sliding off, and keeps
+/// RiderCount in sync on the server.
 [RequireComponent(typeof(Collider))]
 public class BalloonLiftRiderZone : NetworkBehaviour
 {
@@ -30,10 +30,10 @@ public class BalloonLiftRiderZone : NetworkBehaviour
         if (playerNO != null && liftNO != null)
         {
             // Parent on the server; NGO will replicate to all clients.
-            playerNO.TrySetParent(liftNO, true);
+            playerNO.TrySetParent(liftNO, worldPositionStays: true);
 
-            // Register this rider with the lift so it knows not to move empty.
-            lift.RegisterRider(playerNO.OwnerClientId);
+            // Tell the lift this client is riding.
+            lift.RegisterRider(player.OwnerClientId);
         }
     }
 
@@ -49,10 +49,10 @@ public class BalloonLiftRiderZone : NetworkBehaviour
         if (playerNO != null)
         {
             // Detach back to world root.
-            playerNO.TrySetParent((Transform)null, true);
+            playerNO.TrySetParent((Transform)null, worldPositionStays: true);
 
-            // Let the lift know this rider is gone.
-            lift.UnregisterRider(playerNO.OwnerClientId);
+            // Remove this rider from the lift list.
+            lift.UnregisterRider(player.OwnerClientId);
         }
     }
 }
